@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function roomExists(roomId) {
+      return exists(/databases/$(database)/documents/rooms/$(roomId));
+    }
+    function isRoomAdmin(roomId) {
+      return signedIn()
+        && roomExists(roomId)
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data.adminUid == request.auth.uid;
+    }
+
+    match /rooms/{roomId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.adminUid == request.auth.uid
+        && request.resource.data.code == roomId;
+      allow update, delete: if isRoomAdmin(roomId);
+
+      match /participants/{participantUid} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.auth.uid == participantUid
+          && get(/databases/$(database)/documents/rooms/$(roomId)).data.status == 'lobby';
+        allow update: if signedIn()
+          && request.auth.uid == participantUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hasViewedCard', 'viewedAt']);
+        allow delete: if isRoomAdmin(roomId);
+      }
+
+      match /assignments/{participantUid} {
+        allow read: if signedIn() && request.auth.uid == participantUid;
+        allow create: if isRoomAdmin(roomId);
+        allow update, delete: if false;
+      }
+    }
+
+    match /users/{userId}/privateKeys/{roomId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
+    match /users/{userId}/sessions/{roomId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
+  }
+}

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amigo Invisible — Intercambio Seguro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
+
+  <!-- Barra de navegación superior -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center font-bold text-sm">AI</div>
+        <div>
+          <h1 class="font-bold text-slate-900 text-base leading-tight">Amigo Invisible</h1>
+          <p class="text-xs text-slate-500">Intercambio privado y compartido</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <span id="connection-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+          <span class="w-2 h-2 rounded-full bg-amber-500"></span> Conectando con Firebase...
+        </span>
+        <button id="btn-leave-room" type="button" class="hidden px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition">
+          Salir de la sala
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Notificaciones / Mensajes del sistema (reemplaza alert/confirm) -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full px-4 pointer-events-none"></div>
+
+  <!-- Modal de confirmación personalizado -->
+  <div id="confirm-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+      <h3 id="confirm-title" class="text-lg font-bold text-slate-900 mb-2">Confirmar acción</h3>
+      <p id="confirm-message" class="text-sm text-slate-600 mb-6"></p>
+      <div class="flex justify-end gap-3">
+        <button id="confirm-cancel" type="button" class="px-4 py-2 rounded-lg text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-700">Cancelar</button>
+        <button id="confirm-accept" type="button" class="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-700 hover:bg-emerald-800 text-white">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenedor principal -->
+  <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-6 space-y-6">
+<!-- VISTA 1: INICIO (CREAR SALA O ENTRAR CON CÓDIGO) -->
+    <section id="view-home" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Tarjeta: Crear Sala (Administrador) -->
+      <div class="bg-white rounded-xl p-6 border border-slate-200 shadow-xs flex flex-col justify-between">
+        <div>
+          <span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-semibold bg-slate-100 text-slate-700 mb-3">Organizador / Administrador</span>
+          <h2 class="text-xl font-bold text-slate-900 mb-2">Crear una nueva sala</h2>
+          <p class="text-sm text-slate-600 mb-5">
+            Genera un código único para tu grupo. Como administrador gestionarás el sorteo y verás quién ha abierto su carta, pero <strong>nunca tendrás acceso a quién regala a quién</strong>.
+          </p>
+
+          <form id="form-create-room" class="space-y-4">
+            <div>
+              <label for="room-name" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Nombre del evento</label>
+              <input id="room-name" type="text" required maxlength="60" placeholder="Ej. Cena Navidad Oficina 2026"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600" />
+            </div>
+            <div>
+              <label for="room-budget" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Presupuesto orientativo (opcional)</label>
+              <input id="room-budget" type="text" maxlength="40" placeholder="Ej. 20 € - 25 €"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600" />
+            </div>
+            <div class="flex items-start gap-2 pt-1">
+              <input id="admin-also-plays" type="checkbox" class="mt-1 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" />
+              <label for="admin-also-plays" class="text-xs text-slate-600">
+                También quiero participar en el sorteo (se generará una sesión separada de participante para proteger el secreto).
+              </label>
+            </div>
+            <button type="submit" id="btn-submit-create" class="w-full py-2.5 px-4 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-sm transition disabled:opacity-50">
+              Crear sala y obtener código
+            </button>
+          </form>
+        </div>
+        <p class="text-xs text-slate-400 mt-4 pt-3 border-t border-slate-100">
+          Los datos de la sala se eliminan automáticamente a los 60 días de su creación.
+        </p>
+      </div>
+
+      <!-- Tarjeta: Unirse a Sala (Participante o Reconexión) -->
+      <div class="bg-white rounded-xl p-6 border border-slate-200 shadow-xs flex flex-col justify-between">
+        <div>
+          <span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-800 mb-3">Participante</span>
+          <h2 class="text-xl font-bold text-slate-900 mb-2">Entrar con código de sala</h2>
+          <p class="text-sm text-slate-600 mb-5">
+            Introduce el código de 6 caracteres que te ha facilitado el organizador para registrarte en el vestíbulo o consultar tu carta asignada.
+          </p>
+
+          <form id="form-join-room" class="space-y-4">
+            <div>
+              <label for="join-code" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Código de acceso</label>
+              <input id="join-code" type="text" required maxlength="8" placeholder="Ej. A7K9P2" autocomplete="off"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-base font-mono uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-emerald-600" />
+            </div>
+            <button type="submit" id="btn-submit-join" class="w-full py-2.5 px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm transition disabled:opacity-50">
+              Acceder a la sala
+            </button>
+          </form>
+
+          <!-- Accesos recientes guardados en Firestore para este usuario autenticado -->
+          <div id="recent-sessions-box" class="hidden mt-6 pt-5 border-t border-slate-200">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2.5">Tus salas activas</h3>
+            <div id="recent-sessions-list" class="space-y-2"></div>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 mt-4 pt-3 border-t border-slate-100">
+          Si cierras sesión o recargas la página, podrás volver a entrar con el mismo código o desde tus salas activas.
+        </p>
+      </div>
+    </section>
+
+    <!-- VISTA 2: INTERIOR DE LA SALA (VESTÍBULO, REGISTRO, PANEL ADMIN Y CARTA) -->
+    <section id="view-room" class="hidden space-y-6">
+
+      <!-- Cabecera de la Sala -->
+      <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-xs">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              <span id="room-status-badge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Vestíbulo abierto</span>
+              <span id="room-role-badge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">Rol</span>
+              <span id="room-expiry-label" class="text-xs text-slate-400"></span>
+            </div>
+            <h2 id="display-room-name" class="text-2xl font-bold text-slate-900">Nombre de la sala</h2>
+            <p id="display-room-budget" class="text-sm text-slate-600 mt-0.5"></p>
+          </div>
+
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between sm:justify-end gap-3">
+            <div>
+              <span class="block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Código de sala</span>
+              <span id="display-room-code" class="text-xl font-mono font-bold tracking-widest text-emerald-800">------</span>
+            </div>
+            <button id="btn-copy-code" type="button" class="px-3 py-2 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-semibold transition">
+              Copiar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- BLOQUE A: FORMULARIO DE REGISTRO DEL PARTICIPANTE (si entra como participante y aún no está inscrito) -->
+      <div id="participant-register-card" class="hidden bg-white rounded-xl p-6 border border-emerald-200 shadow-xs">
+        <h3 class="text-lg font-bold text-slate-900 mb-1">Completa tu ficha de participante</h3>
+        <p class="text-sm text-slate-600 mb-4">Estos datos serán visibles para la persona a la que le toque regalarte.</p>
+
+        <form id="form-register-participant" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label for="part-name" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Tu nombre o apodo *</label>
+            <input id="part-name" type="text" required maxlength="40" placeholder="Ej. Laura G."
+              class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600" />
+          </div>
+          <div>
+            <label for="part-size" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Talla de ropa / calzado *</label>
+            <select id="part-size" required class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600">
+              <option value="">Selecciona una talla...</option>
+              <option value="XS">XS</option>
+              <option value="S">S</option>
+              <option value="M">M</option>
+              <option value="L">L</option>
+              <option value="XL">XL</option>
+              <option value="XXL">XXL</option>
+              <option value="No aplica">No aplica / Prefiero no indicar</option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label for="part-prefs" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Preferencias, gustos o alergias *</label>
+            <textarea id="part-prefs" rows="3" required maxlength="300" placeholder="Ej. Me gusta la novela negra, el café de especialidad y los calcetines originales. Sin frutos secos."
+              class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"></textarea>
+          </div>
+          <div class="sm:col-span-2 flex justify-end">
+            <button type="submit" id="btn-submit-participant" class="px-5 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-sm transition disabled:opacity-50">
+              Unirme al vestíbulo
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- BLOQUE B: CARTA SECRETA DEL PARTICIPANTE (visible solo tras el sorteo y solo para su dueño) -->
+      <div id="participant-card-section" class="hidden bg-white rounded-xl p-6 border-2 border-emerald-600 shadow-sm space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-semibold bg-emerald-100 text-emerald-800 mb-1">Tu Carta Confidencial</span>
+            <h3 class="text-lg font-bold text-slate-900">Resultado del sorteo</h3>
+          </div>
+          <span id="card-viewed-status" class="text-xs font-medium text-slate-500"></span>
+        </div>
+
+        <!-- Estado 1: Carta cerrada (aún no revelada) -->
+        <div id="card-sealed-box" class="bg-slate-50 rounded-xl p-6 text-center border border-slate-200 space-y-3">
+          <p class="text-sm text-slate-700 max-w-md mx-auto">
+            El sorteo ya se ha realizado. Tu asignación está cifrada y protegida. Pulsa el botón para abrir tu carta; al hacerlo, el administrador sabrá que ya la has consultado (pero nunca verá a quién regalas).
+          </p>
+          <button id="btn-reveal-card" type="button" class="px-5 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-sm transition">
+            Abrir mi carta secreta
+          </button>
+        </div>
+
+        <!-- Estado 2: Carta abierta (revelada) -->
+        <div id="card-opened-box" class="hidden space-y-4">
+          <div id="printable-card" class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-5 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold uppercase tracking-wider text-emerald-800">Te toca regalar a:</span>
+              <span id="card-room-tag" class="text-xs text-slate-500"></span>
+            </div>
+            <p id="card-target-name" class="text-2xl font-bold text-slate-900">---</p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-emerald-200/70 text-sm">
+              <div class="bg-white p-3 rounded-lg border border-emerald-100">
+                <span class="block text-xs font-semibold text-slate-500">Talla indicada</span>
+                <span id="card-target-size" class="font-semibold text-slate-900">---</span>
+              </div>
+              <div class="sm:col-span-2 bg-white p-3 rounded-lg border border-emerald-100">
+                <span class="block text-xs font-semibold text-slate-500">Preferencias y pistas</span>
+                <p id="card-target-prefs" class="text-slate-800 mt-0.5">---</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-xs text-slate-500">Guarda una copia para tenerla a mano cuando compres el regalo.</p>
+            <div class="flex flex-wrap gap-2">
+              <button id="btn-download-png" type="button" class="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition">
+                Descargar carta (PNG)
+              </button>
+              <button id="btn-download-txt" type="button" class="px-4 py-2 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-semibold transition">
+                Descargar texto (.TXT)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BLOQUE C: CONTROLES DEL ADMINISTRADOR (Iniciar sorteo y Auditoría de visualizaciones) -->
+      <div id="admin-control-section" class="hidden bg-white rounded-xl p-6 border border-slate-200 shadow-xs space-y-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div>
+            <h3 class="text-lg font-bold text-slate-900">Panel de Control del Administrador</h3>
+            <p class="text-xs text-slate-600 mt-0.5">
+              Privacidad garantizada: las asignaciones se cifran individualmente con la clave secreta de cada participante. Como administrador no tienes acceso a ellas.
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btn-start-draw" type="button" class="px-5 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-sm transition disabled:opacity-50">
+              Iniciar Sorteo Ahora
+            </button>
+          </div>
+        </div>
+
+        <!-- Resumen de auditoría de lectura (solo tras el sorteo) -->
+        <div id="admin-audit-box" class="hidden space-y-3">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-bold text-slate-800">Estado de lectura de cartas</h4>
+            <span id="admin-viewed-counter" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">0 / 0 han visto su carta</span>
+          </div>
+          <p class="text-xs text-slate-500">
+            Aquí puedes comprobar quién ha abierto ya su carta para recordarles que entren si falta alguien. No se muestra ningún dato del destinatario asignado.
+          </p>
+        </div>
+      </div>
+
+      <!-- BLOQUE D: VESTÍBULO EN TIEMPO REAL (Visible para todos en la sala) -->
+      <div class="bg-white rounded-xl p-6 border border-slate-200 shadow-xs space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-lg font-bold text-slate-900">Vestíbulo de Participantes</h3>
+            <p class="text-xs text-slate-500">Actualización automática en tiempo real entre todos los dispositivos conectados.</p>
+          </div>
+          <span id="lobby-count-badge" class="px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-800">0 inscritos</span>
+        </div>
+
+        <div id="lobby-empty" class="text-center py-8 text-sm text-slate-500 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+          Aún no hay participantes registrados en el vestíbulo. Comparte el código de sala para que se unan.
+        </div>
+
+        <div id="lobby-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer class="bg-white border-t border-slate-200 py-4 mt-8">
+    <div class="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+      <span>Amigo Invisible Seguro · Salas compartidas en tiempo real · Cartas cifradas por participante.</span>
+      <span>Consulta la política de conservación en la configuración del proyecto.</span>
+    </div>
+  </footer>
+
+  <!-- Módulo principal de aplicación con Firebase Firestore y Auth -->
+  <script src="./js/firebase-config.js"></script>
+  <script type="module" src="./js/app.js"></script>
+  </body>
+</html>
