@@ -8,6 +8,6 @@ window.FIREBASE_CONFIG = {
   appId: "1:580766516695:web:d2b35827e9de42d1467792",
   measurementId: "G-QT6RDQP3CQ",
 
-  databaseURL: "PEGA_AQUI_LA_URL_DE_REALTIME_DATABASE"
+  databaseURL: "https://amigo-inadmisible-default-rtdb.europe-west1.firebasedatabase.app/"
 };
 
