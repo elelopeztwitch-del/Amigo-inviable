@@ -1,9 +1,21 @@
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import {
-      getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
-      collection, onSnapshot, getDocs, writeBatch
-    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+import {
+  getAuth,
+  signInAnonymously,
+  signInWithCustomToken
+} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+import {
+  getDatabase,
+  ref,
+  get,
+  set,
+  update,
+  remove,
+  onValue
+} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 
     // =========================================================================
     // 1. CONFIGURACIÓN E INICIALIZACIÓN DE BASE DE DATOS REAL (FIRESTORE)
