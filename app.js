@@ -31,7 +31,10 @@ s";
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);
+    const db = getDatabase(
+  app,
+  "https://amigo-inadmisible-default-rtdb.europe-west1.firebasedatabase.app"
+);
 
     // Constante de expiración obligatoria: 60 días en milisegundos
     const RETENTION_DAYS = 60;
