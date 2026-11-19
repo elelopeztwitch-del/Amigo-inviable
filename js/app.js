@@ -34,6 +34,104 @@ import {
   app,
   "https://amigo-inadmisible-default-rtdb.europe-west1.firebasedatabase.app"
 );
+// ======================================================
+// ADAPTADOR COMPLETO FIRESTORE -> REALTIME DATABASE
+// ======================================================
+
+const makePath = (...parts) => parts.filter(Boolean).join("/");
+
+const doc = (_db, ...parts) => ({
+  _path: makePath(...parts)
+});
+
+const collection = (_db, ...parts) => ({
+  _path: makePath(...parts)
+});
+
+function wrapSnapshot(snapshot) {
+  const value = snapshot.val();
+
+  return {
+    id: snapshot.key,
+
+    exists: () => snapshot.exists(),
+
+    data: () => value,
+
+    forEach: (callback) => {
+      if (!snapshot.exists() || !value || typeof value !== "object") {
+        return;
+      }
+
+      Object.entries(value).forEach(([id, child]) => {
+        callback({
+          id,
+          exists: () => child !== null && child !== undefined,
+          data: () => child
+        });
+      });
+    }
+  };
+}
+
+async function getDoc(documentRef) {
+  const snapshot = await get(ref(db, documentRef._path));
+  return wrapSnapshot(snapshot);
+}
+
+async function getDocs(collectionRef) {
+  const snapshot = await get(ref(db, collectionRef._path));
+  return wrapSnapshot(snapshot);
+}
+
+async function setDoc(documentRef, data, options = {}) {
+  const databaseRef = ref(db, documentRef._path);
+
+  if (options.merge) {
+    return update(databaseRef, data);
+  }
+
+  return set(databaseRef, data);
+}
+
+async function updateDoc(documentRef, data) {
+  return update(ref(db, documentRef._path), data);
+}
+
+async function deleteDoc(documentRef) {
+  return remove(ref(db, documentRef._path));
+}
+
+function onSnapshot(targetRef, callback, onError) {
+  return onValue(
+    ref(db, targetRef._path),
+    snapshot => callback(wrapSnapshot(snapshot)),
+    onError
+  );
+}
+
+function writeBatch() {
+  const pendingUpdates = {};
+
+  return {
+    set(documentRef, data) {
+      pendingUpdates[documentRef._path] = data;
+      return this;
+    },
+
+    update(documentRef, data) {
+      Object.entries(data).forEach(([key, value]) => {
+        pendingUpdates[`${documentRef._path}/${key}`] = value;
+      });
+
+      return this;
+    },
+
+    async commit() {
+      return update(ref(db), pendingUpdates);
+    }
+  };
+}
 
     // Constante de expiración obligatoria: 60 días en milisegundos
     const RETENTION_DAYS = 60;
