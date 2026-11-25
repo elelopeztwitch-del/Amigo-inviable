@@ -1315,6 +1315,11 @@ function renderQuickRecoveryBox() {
         state.decryptedCard = decrypted;
         state.myAssignment = assignSnap.val();
 
+        await update(participantRef(state.currentRoomId, selectedUid), {
+          hasViewedCard: true,
+          viewedAt: Date.now()
+        });
+
         document.getElementById("card-sealed-box")?.classList.add("hidden");
         document.getElementById("card-opened-box")?.classList.remove("hidden");
 
