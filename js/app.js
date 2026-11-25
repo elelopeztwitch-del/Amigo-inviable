@@ -782,28 +782,26 @@ async function handleRevealMyCard() {
   if (!state.user || !state.currentRoomId) return;
 
   try {
-    // Recuperar siempre la asignación directamente de Firebase
-    const assignmentSnapshot = await get(
-      assignmentRef(state.currentRoomId, state.user.uid)
-    );
+    const roomId = state.currentRoomId;
+    const uid = state.user.uid;
+
+    // Recuperar la asignación directamente de Firebase
+    const assignmentSnapshot = await get(assignmentRef(roomId, uid));
 
     if (!assignmentSnapshot.exists()) {
-      showToast("No se encuentra tu asignación. Contacta con el administrador.", "error");
-      return;
+      throw new Error("No se encuentra tu carta en esta cuenta.");
     }
 
     state.myAssignment = assignmentSnapshot.val();
 
     // Recuperar la clave privada
-    const keySnapshot = await get(
-      privateKeyRef(state.user.uid, state.currentRoomId)
-    );
+    const keySnapshot = await get(privateKeyRef(uid, roomId));
 
-    if (!keySnapshot.exists() || !keySnapshot.val()?.privateJwk) {
-      throw new Error("No se encuentra tu clave privada.");
+    if (!keySnapshot.exists()) {
+      throw new Error("No se encuentra tu clave privada en esta cuenta.");
     }
 
-    // Intentar descifrar ANTES de marcar la carta como vista
+    // Descifrar primero la carta
     const decrypted = await decryptWithParticipantPrivateKey(
       keySnapshot.val().privateJwk,
       state.myAssignment.encryptedBundle
@@ -811,24 +809,19 @@ async function handleRevealMyCard() {
 
     state.decryptedCard = decrypted;
 
-    // Solo marcar como vista si el descifrado ha funcionado
-    await update(
-      participantRef(state.currentRoomId, state.user.uid),
-      {
-        hasViewedCard: true,
-        viewedAt: Date.now()
-      }
-    );
+    // Marcar como vista solamente después de descifrar correctamente
+    await update(participantRef(roomId, uid), {
+      hasViewedCard: true,
+      viewedAt: Date.now()
+    });
 
     await renderParticipantCard(true);
-    showToast("¡Carta abierta correctamente!", "success");
+
+    showToast("Carta abierta.", "success");
 
   } catch (error) {
-    console.error("Error abriendo la carta:", error);
-    showToast(
-      `No se pudo abrir la carta: ${error.message}. Puedes volver a intentarlo.`,
-      "error"
-    );
+    console.error("Error abriendo carta:", error);
+    showToast(`No se pudo abrir la carta: ${error.message}`, "error");
   }
 }
 
@@ -973,67 +966,57 @@ function renderRoomUI(forceShowRegForAdmin = false) {
 
 async function renderParticipantCard(forceOpen = false) {
   const section = document.getElementById("participant-card-section");
-  if (!section || !state.user || !state.currentRoomId || !state.roomData) return;
+  if (!section) return;
 
-  if (state.roomData.status !== "drawn") {
+  if (!state.roomData || state.roomData.status !== "drawn" || !state.user) {
     section.classList.add("hidden");
     return;
   }
 
-  // Si todavía no tenemos la asignación, volver a consultarla
-  if (!state.myAssignment) {
-    try {
-      const snapshot = await get(
-        assignmentRef(state.currentRoomId, state.user.uid)
-      );
+  const roomId = state.currentRoomId;
+  const uid = state.user.uid;
 
-      if (!snapshot.exists()) {
+  try {
+    // Recuperar la asignación si todavía no está cargada
+    if (!state.myAssignment) {
+      const assignmentSnapshot = await get(assignmentRef(roomId, uid));
+
+      if (!assignmentSnapshot.exists()) {
         section.classList.add("hidden");
         return;
       }
 
-      state.myAssignment = snapshot.val();
-    } catch (error) {
-      console.error("Error recuperando asignación:", error);
-      section.classList.add("hidden");
+      state.myAssignment = assignmentSnapshot.val();
+    }
+
+    section.classList.remove("hidden");
+
+    const myRecord = state.participants.find((p) => p.uid === uid);
+    const alreadyViewed = forceOpen || Boolean(myRecord?.hasViewedCard);
+
+    const sealedBox = document.getElementById("card-sealed-box");
+    const openedBox = document.getElementById("card-opened-box");
+    const statusLabel = document.getElementById("card-viewed-status");
+
+    if (!alreadyViewed) {
+      sealedBox?.classList.remove("hidden");
+      openedBox?.classList.add("hidden");
+
+      if (statusLabel) {
+        statusLabel.textContent = "Estado: Sin abrir";
+      }
+
       return;
     }
-  }
 
-  section.classList.remove("hidden");
-
-  const myRecord = state.participants.find(
-    (p) => p.uid === state.user.uid
-  );
-
-  const alreadyViewed = forceOpen || myRecord?.hasViewedCard === true;
-
-  const sealedBox = document.getElementById("card-sealed-box");
-  const openedBox = document.getElementById("card-opened-box");
-  const statusLabel = document.getElementById("card-viewed-status");
-
-  if (!alreadyViewed) {
-    sealedBox?.classList.remove("hidden");
-    openedBox?.classList.add("hidden");
-
-    if (statusLabel) {
-      statusLabel.textContent = "Estado: Sin abrir";
-    }
-
-    return;
-  }
-
-  try {
-    // Si ya tenemos la carta descifrada, no repetir el proceso
+    // Si ya tenemos la carta descifrada, reutilizarla
     let decrypted = state.decryptedCard;
 
     if (!decrypted) {
-      const keySnapshot = await get(
-        privateKeyRef(state.user.uid, state.currentRoomId)
-      );
+      const keySnapshot = await get(privateKeyRef(uid, roomId));
 
-      if (!keySnapshot.exists() || !keySnapshot.val()?.privateJwk) {
-        throw new Error("No se encuentra tu clave privada.");
+      if (!keySnapshot.exists()) {
+        throw new Error("No se encuentra tu clave privada en esta cuenta.");
       }
 
       decrypted = await decryptWithParticipantPrivateKey(
@@ -1051,10 +1034,10 @@ async function renderParticipantCard(forceOpen = false) {
       statusLabel.textContent = "Estado: Carta visualizada";
     }
 
-    const roomTag = document.getElementById("card-room-tag");
     const targetName = document.getElementById("card-target-name");
     const targetSize = document.getElementById("card-target-size");
     const targetPrefs = document.getElementById("card-target-prefs");
+    const roomTag = document.getElementById("card-room-tag");
 
     if (roomTag) {
       roomTag.textContent = `${decrypted.roomName} (${decrypted.roomCode})`;
@@ -1065,20 +1048,15 @@ async function renderParticipantCard(forceOpen = false) {
     if (targetPrefs) targetPrefs.textContent = decrypted.targetPreferences;
 
   } catch (error) {
-    console.error("Error descifrando carta:", error);
+    console.error("Error mostrando la carta:", error);
 
-    // Si falla, mantener visible la opción de volver a intentarlo
-    sealedBox?.classList.remove("hidden");
-    openedBox?.classList.add("hidden");
+    // Si falla el descifrado, permitir volver a intentar abrirla
+    document.getElementById("card-sealed-box")?.classList.remove("hidden");
+    document.getElementById("card-opened-box")?.classList.add("hidden");
 
-    if (statusLabel) {
-      statusLabel.textContent = "No se ha podido abrir. Puedes volver a intentarlo.";
-    }
-
-    showToast(`Error al descifrar la carta: ${error.message}`, "error");
+    showToast(`Error al mostrar tu carta: ${error.message}`, "error");
   }
 }
-
 // ============================================================
 // 15. DESCARGAR CARTA EN TXT
 // ============================================================
