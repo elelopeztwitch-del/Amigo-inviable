@@ -582,16 +582,24 @@ function subscribeToRoomRealtime(roomId, forceShowRegForAdmin = false) {
     }
   );
 
+ 
   state.unsubAssignment = onValue(
     assignmentRef(roomId, state.user.uid),
     async (snapshot) => {
-      state.myAssignment = snapshot.exists() ? snapshot.val() : null;
+      if (state.currentRoomId !== roomId) return;
+
+      state.myAssignment = snapshot.exists()
+        ? snapshot.val()
+        : null;
+
       await renderParticipantCard();
     },
     (error) => {
       console.error("Error leyendo asignación:", error);
+      showToast("No se ha podido cargar tu carta.", "error");
     }
   );
+
 }
 // ============================================================
 // 10. REGISTRAR PARTICIPANTE
@@ -769,26 +777,61 @@ async function handleStartDraw() {
 // 12. ABRIR LA CARTA PROPIA
 // ============================================================
 
+
 async function handleRevealMyCard() {
-  if (!state.user || !state.currentRoomId || !state.myAssignment) return;
+  if (!state.user || !state.currentRoomId) return;
 
   try {
-    const snapshot = await get(participantRef(state.currentRoomId, state.user.uid));
+    // Recuperar siempre la asignación directamente de Firebase
+    const assignmentSnapshot = await get(
+      assignmentRef(state.currentRoomId, state.user.uid)
+    );
 
-    if (snapshot.exists() && !snapshot.val().hasViewedCard) {
-      await update(participantRef(state.currentRoomId, state.user.uid), {
-        hasViewedCard: true,
-        viewedAt: Date.now()
-      });
+    if (!assignmentSnapshot.exists()) {
+      showToast("No se encuentra tu asignación. Contacta con el administrador.", "error");
+      return;
     }
 
+    state.myAssignment = assignmentSnapshot.val();
+
+    // Recuperar la clave privada
+    const keySnapshot = await get(
+      privateKeyRef(state.user.uid, state.currentRoomId)
+    );
+
+    if (!keySnapshot.exists() || !keySnapshot.val()?.privateJwk) {
+      throw new Error("No se encuentra tu clave privada.");
+    }
+
+    // Intentar descifrar ANTES de marcar la carta como vista
+    const decrypted = await decryptWithParticipantPrivateKey(
+      keySnapshot.val().privateJwk,
+      state.myAssignment.encryptedBundle
+    );
+
+    state.decryptedCard = decrypted;
+
+    // Solo marcar como vista si el descifrado ha funcionado
+    await update(
+      participantRef(state.currentRoomId, state.user.uid),
+      {
+        hasViewedCard: true,
+        viewedAt: Date.now()
+      }
+    );
+
     await renderParticipantCard(true);
-    showToast("Carta abierta.", "success");
+    showToast("¡Carta abierta correctamente!", "success");
+
   } catch (error) {
-    console.error("Error abriendo carta:", error);
-    showToast(`No se pudo abrir la carta: ${error.message}`, "error");
+    console.error("Error abriendo la carta:", error);
+    showToast(
+      `No se pudo abrir la carta: ${error.message}. Puedes volver a intentarlo.`,
+      "error"
+    );
   }
 }
+
 
 // ============================================================
 // 13. PINTAR LA SALA
@@ -927,24 +970,43 @@ function renderRoomUI(forceShowRegForAdmin = false) {
 // 14. MOSTRAR Y DESCIFRAR LA CARTA
 // ============================================================
 
+
 async function renderParticipantCard(forceOpen = false) {
   const section = document.getElementById("participant-card-section");
-  if (!section) return;
+  if (!section || !state.user || !state.currentRoomId || !state.roomData) return;
 
-  if (
-    !state.roomData ||
-    state.roomData.status !== "drawn" ||
-    !state.myAssignment ||
-    !state.user
-  ) {
+  if (state.roomData.status !== "drawn") {
     section.classList.add("hidden");
     return;
   }
 
+  // Si todavía no tenemos la asignación, volver a consultarla
+  if (!state.myAssignment) {
+    try {
+      const snapshot = await get(
+        assignmentRef(state.currentRoomId, state.user.uid)
+      );
+
+      if (!snapshot.exists()) {
+        section.classList.add("hidden");
+        return;
+      }
+
+      state.myAssignment = snapshot.val();
+    } catch (error) {
+      console.error("Error recuperando asignación:", error);
+      section.classList.add("hidden");
+      return;
+    }
+  }
+
   section.classList.remove("hidden");
 
-  const myRecord = state.participants.find((p) => p.uid === state.user.uid);
-  const alreadyViewed = forceOpen || (myRecord && myRecord.hasViewedCard);
+  const myRecord = state.participants.find(
+    (p) => p.uid === state.user.uid
+  );
+
+  const alreadyViewed = forceOpen || myRecord?.hasViewedCard === true;
 
   const sealedBox = document.getElementById("card-sealed-box");
   const openedBox = document.getElementById("card-opened-box");
@@ -953,40 +1015,67 @@ async function renderParticipantCard(forceOpen = false) {
   if (!alreadyViewed) {
     sealedBox?.classList.remove("hidden");
     openedBox?.classList.add("hidden");
-    if (statusLabel) statusLabel.textContent = "Estado: Sin abrir";
+
+    if (statusLabel) {
+      statusLabel.textContent = "Estado: Sin abrir";
+    }
+
     return;
   }
 
   try {
-    const keySnapshot = await get(privateKeyRef(state.user.uid, state.currentRoomId));
+    // Si ya tenemos la carta descifrada, no repetir el proceso
+    let decrypted = state.decryptedCard;
 
-    if (!keySnapshot.exists()) {
-      throw new Error("No se encuentra tu clave privada en esta cuenta.");
+    if (!decrypted) {
+      const keySnapshot = await get(
+        privateKeyRef(state.user.uid, state.currentRoomId)
+      );
+
+      if (!keySnapshot.exists() || !keySnapshot.val()?.privateJwk) {
+        throw new Error("No se encuentra tu clave privada.");
+      }
+
+      decrypted = await decryptWithParticipantPrivateKey(
+        keySnapshot.val().privateJwk,
+        state.myAssignment.encryptedBundle
+      );
+
+      state.decryptedCard = decrypted;
     }
-
-    const decrypted = await decryptWithParticipantPrivateKey(
-      keySnapshot.val().privateJwk,
-      state.myAssignment.encryptedBundle
-    );
-
-    state.decryptedCard = decrypted;
 
     sealedBox?.classList.add("hidden");
     openedBox?.classList.remove("hidden");
-    if (statusLabel) statusLabel.textContent = "Estado: Carta visualizada";
 
+    if (statusLabel) {
+      statusLabel.textContent = "Estado: Carta visualizada";
+    }
+
+    const roomTag = document.getElementById("card-room-tag");
     const targetName = document.getElementById("card-target-name");
     const targetSize = document.getElementById("card-target-size");
     const targetPrefs = document.getElementById("card-target-prefs");
-    const roomTag = document.getElementById("card-room-tag");
 
-    if (roomTag) roomTag.textContent = `${decrypted.roomName} (${decrypted.roomCode})`;
+    if (roomTag) {
+      roomTag.textContent = `${decrypted.roomName} (${decrypted.roomCode})`;
+    }
+
     if (targetName) targetName.textContent = decrypted.targetName;
     if (targetSize) targetSize.textContent = decrypted.targetSize;
     if (targetPrefs) targetPrefs.textContent = decrypted.targetPreferences;
+
   } catch (error) {
     console.error("Error descifrando carta:", error);
-    showToast(`Error al descifrar tu carta: ${error.message}`, "error");
+
+    // Si falla, mantener visible la opción de volver a intentarlo
+    sealedBox?.classList.remove("hidden");
+    openedBox?.classList.add("hidden");
+
+    if (statusLabel) {
+      statusLabel.textContent = "No se ha podido abrir. Puedes volver a intentarlo.";
+    }
+
+    showToast(`Error al descifrar la carta: ${error.message}`, "error");
   }
 }
 
