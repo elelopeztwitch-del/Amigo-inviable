@@ -545,6 +545,8 @@ function subscribeToRoomRealtime(roomId, forceShowRegForAdmin = false) {
   state.unsubRoom = onValue(
     roomRef(roomId),
     (snapshot) => {
+      if (state.currentRoomId !== roomId) return;
+
       if (!snapshot.exists()) {
         showToast("La sala ya no existe.", "warning");
         leaveRoomView();
@@ -553,7 +555,9 @@ function subscribeToRoomRealtime(roomId, forceShowRegForAdmin = false) {
 
       state.roomData = snapshot.val();
       renderRoomUI(forceShowRegForAdmin);
-      renderParticipantCard();
+      renderParticipantCard().catch((err) => {
+        console.error("Error renderizando carta desde roomRef:", err);
+      });
     },
     (error) => {
       console.error("Error escuchando sala:", error);
@@ -564,6 +568,8 @@ function subscribeToRoomRealtime(roomId, forceShowRegForAdmin = false) {
   state.unsubParticipants = onValue(
     participantsRef(roomId),
     (snapshot) => {
+      if (state.currentRoomId !== roomId) return;
+
       const data = snapshot.val() || {};
 
       state.participants = Object.entries(data).map(([uid, participant]) => ({
@@ -574,7 +580,9 @@ function subscribeToRoomRealtime(roomId, forceShowRegForAdmin = false) {
       state.participants.sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
 
       renderRoomUI(forceShowRegForAdmin);
-      renderParticipantCard();
+      renderParticipantCard().catch((err) => {
+        console.error("Error renderizando carta desde participantsRef:", err);
+      });
     },
     (error) => {
       console.error("Error leyendo participantes:", error);
@@ -582,16 +590,14 @@ function subscribeToRoomRealtime(roomId, forceShowRegForAdmin = false) {
     }
   );
 
- 
+  if (!state.user || !state.user.uid) return;
+
   state.unsubAssignment = onValue(
     assignmentRef(roomId, state.user.uid),
     async (snapshot) => {
       if (state.currentRoomId !== roomId) return;
 
-      state.myAssignment = snapshot.exists()
-        ? snapshot.val()
-        : null;
-
+      state.myAssignment = snapshot.exists() ? snapshot.val() : null;
       await renderParticipantCard();
     },
     (error) => {
@@ -599,7 +605,6 @@ function subscribeToRoomRealtime(roomId, forceShowRegForAdmin = false) {
       showToast("No se ha podido cargar tu carta.", "error");
     }
   );
-
 }
 // ============================================================
 // 10. REGISTRAR PARTICIPANTE
@@ -963,7 +968,6 @@ function renderRoomUI(forceShowRegForAdmin = false) {
 // 14. MOSTRAR Y DESCIFRAR LA CARTA
 // ============================================================
 
-
 async function renderParticipantCard(forceOpen = false) {
   const section = document.getElementById("participant-card-section");
   if (!section) return;
@@ -978,15 +982,27 @@ async function renderParticipantCard(forceOpen = false) {
 
   try {
     // Recuperar la asignación si todavía no está cargada
-    if (!state.myAssignment) {
+    if (state.myAssignment === null) {
       const assignmentSnapshot = await get(assignmentRef(roomId, uid));
+      if (state.currentRoomId !== roomId) return;
 
-      if (!assignmentSnapshot.exists()) {
-        section.classList.add("hidden");
-        return;
+      state.myAssignment = assignmentSnapshot.exists()
+        ? assignmentSnapshot.val()
+        : false;
+    }
+
+    // Si no existe asignación para este UID en esta sesión, mostrar aviso claro en vez de dejar todo oculto
+    if (!state.myAssignment) {
+      section.classList.remove("hidden");
+      document.getElementById("card-sealed-box")?.classList.add("hidden");
+      document.getElementById("card-opened-box")?.classList.add("hidden");
+
+      const statusLabel = document.getElementById("card-viewed-status");
+      if (statusLabel) {
+        statusLabel.textContent =
+          `Sesión actual (${uid}): no coincide con una asignación registrada en esta sala. Abre la sala desde el mismo navegador donde te inscribiste.`;
       }
-
-      state.myAssignment = assignmentSnapshot.val();
+      return;
     }
 
     section.classList.remove("hidden");
@@ -1046,9 +1062,13 @@ async function renderParticipantCard(forceOpen = false) {
     if (targetName) targetName.textContent = decrypted.targetName;
     if (targetSize) targetSize.textContent = decrypted.targetSize;
     if (targetPrefs) targetPrefs.textContent = decrypted.targetPreferences;
-
   } catch (error) {
     console.error("Error mostrando la carta:", error);
+
+    const statusLabel = document.getElementById("card-viewed-status");
+    if (statusLabel) {
+      statusLabel.textContent = "Estado: Sin abrir";
+    }
 
     // Si falla el descifrado, permitir volver a intentar abrirla
     document.getElementById("card-sealed-box")?.classList.remove("hidden");
@@ -1057,6 +1077,7 @@ async function renderParticipantCard(forceOpen = false) {
     showToast(`Error al mostrar tu carta: ${error.message}`, "error");
   }
 }
+
 // ============================================================
 // 15. DESCARGAR CARTA EN TXT
 // ============================================================
