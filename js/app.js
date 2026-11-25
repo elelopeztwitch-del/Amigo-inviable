@@ -1263,3 +1263,95 @@ if (document.readyState === "loading") {
 } else {
   initAuthAndApp();
 }
+// ============================================================
+// RECUPERACIÓN RÁPIDA PARA QUE LO VEAN EN LA WEB
+// ============================================================
+
+function renderQuickRecoveryBox() {
+  const cardSection = document.getElementById("participant-card-section");
+  if (!cardSection || !state.roomData || state.roomData.status !== "drawn") {
+    document.getElementById("quick-recovery-box")?.remove();
+    return;
+  }
+
+  let box = document.getElementById("quick-recovery-box");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "quick-recovery-box";
+    box.className = "mt-4 p-4 rounded-xl border border-amber-300 bg-amber-50/70 space-y-3";
+    box.innerHTML = `
+      <p class="text-xs font-bold text-amber-900">
+        ¿No te sale tu carta porque cambiaste de navegador o enlace? Elige tu nombre aquí:
+      </p>
+      <div class="flex flex-col sm:flex-row gap-2">
+        <select id="recovery-participant-select" class="flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-slate-800"></select>
+        <button id="btn-recovery-open" type="button" class="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold">
+          Ver mi carta
+        </button>
+      </div>
+    `;
+    cardSection.appendChild(box);
+
+    document.getElementById("btn-recovery-open")?.addEventListener("click", async () => {
+      const selectedUid = document.getElementById("recovery-participant-select")?.value;
+      if (!selectedUid || !state.currentRoomId) return;
+
+      try {
+        const [assignSnap, keySnap] = await Promise.all([
+          get(assignmentRef(state.currentRoomId, selectedUid)),
+          get(privateKeyRef(selectedUid, state.currentRoomId))
+        ]);
+
+        if (!assignSnap.exists() || !keySnap.exists()) {
+          showToast("No se encontraron datos de sorteo o clave para ese participante.", "error");
+          return;
+        }
+
+        const decrypted = await decryptWithParticipantPrivateKey(
+          keySnap.val().privateJwk,
+          assignSnap.val().encryptedBundle
+        );
+
+        state.decryptedCard = decrypted;
+        state.myAssignment = assignSnap.val();
+
+        document.getElementById("card-sealed-box")?.classList.add("hidden");
+        document.getElementById("card-opened-box")?.classList.remove("hidden");
+
+        const statusLabel = document.getElementById("card-viewed-status");
+        if (statusLabel) statusLabel.textContent = "Estado: Carta visualizada";
+
+        const roomTag = document.getElementById("card-room-tag");
+        const targetName = document.getElementById("card-target-name");
+        const targetSize = document.getElementById("card-target-size");
+        const targetPrefs = document.getElementById("card-target-prefs");
+
+        if (roomTag) roomTag.textContent = `${decrypted.roomName} (${decrypted.roomCode})`;
+        if (targetName) targetName.textContent = decrypted.targetName;
+        if (targetSize) targetSize.textContent = decrypted.targetSize;
+        if (targetPrefs) targetPrefs.textContent = decrypted.targetPreferences;
+
+        showToast("Carta recuperada y mostrada.", "success");
+      } catch (err) {
+        console.error(err);
+        showToast(`Error al descifrar: ${err.message}`, "error");
+      }
+    });
+  }
+
+  const select = document.getElementById("recovery-participant-select");
+  if (select) {
+    const currentValue = select.value;
+    select.innerHTML = `<option value="">-- Selecciona tu nombre --</option>` +
+      state.participants
+        .map((p) => `<option value="${escapeHtml(p.uid)}">${escapeHtml(p.name)}</option>`)
+        .join("");
+    if (currentValue) select.value = currentValue;
+  }
+}
+
+const _origRenderParticipantCard = renderParticipantCard;
+renderParticipantCard = async function (...args) {
+  await _origRenderParticipantCard(...args);
+  renderQuickRecoveryBox();
+};
